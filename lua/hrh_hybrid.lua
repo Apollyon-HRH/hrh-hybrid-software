@@ -1,5 +1,5 @@
 -- HRH Hybrid Powertrain - Team Apollyon
--- Versão autônoma: funciona sem vehicleController.lua
+-- Versão autónoma definitiva
 
 local M = {}
 
@@ -21,15 +21,19 @@ end
 
 -- Aplica potência diretamente nos valores de throttle do motor elétrico
 local function apply_throttle(motor_throttle_name, torque_nm)
-    if not vehicle then return end
+    if not vehicle then
+        log('W', 'HRH', 'apply_throttle: vehicle is nil')
+        return
+    end
     vehicle.electrics.values[motor_throttle_name] = torque_nm
+    log('I', 'HRH', string.format('apply_throttle: %s = %.1f Nm', motor_throttle_name, torque_nm))
 end
 
 -- Função chamada quando a extensão é carregada
 function M.onExtensionLoaded()
     print("HRH Hybrid: Sistema inicializado (autônomo).")
     
-    -- Obtém a referência do veículo através da API de extensões
+    -- Obtém a referência do veículo
     vehicle = extensions.getVehicle()
     if vehicle then
         print("HRH Hybrid: Veículo referenciado com sucesso.")
@@ -37,7 +41,7 @@ function M.onExtensionLoaded()
         print("HRH Hybrid: ERRO - Não foi possível obter referência do veículo.")
     end
 
-    -- Cria a tabela de debug global para uso na consola
+    -- Cria a tabela de debug global
     _G.hrh_debug = {
         get_soc = function() return soc end,
         kill = function() M.emergency_kill() end,
@@ -49,6 +53,10 @@ function M.onExtensionLoaded()
                 print("mgur throttle: " .. tostring(vehicle.electrics.values.mgur_throttle))
             else
                 print("Vehicle reference is nil")
+            end
+            -- Adiciona verificação do throttle_input
+            if vehicle then
+                print("throttle_input: " .. tostring(vehicle.electrics.values.throttle_input))
             end
         end,
         set_throttle = function(value)
