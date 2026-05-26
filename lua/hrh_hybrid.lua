@@ -1,42 +1,104 @@
--- HRH Hybrid Powertrain - Team Apollyon
--- Versão autónoma definitiva
+-- HRH Hybrid Powertrain - Team Apollyon (UNIFIED VERSION)
+-- Contains the main controller and hybrid logic
 
 local M = {}
 
--- Parâmetros (Apêndice C5.1)
-local BATTERY_CAPACITY_KWH = 8.0
-local MGUF_MAX_POWER_KW = 325
-local MGUR_MAX_POWER_KW = 325
-local REGEN_MAX_POWER_KW = 250
-local MAX_TORQUE_NM = 500
+-- ==============================================
+-- PARÂMETROS DO SISTEMA HÍBRIDO (Apêndice C5.1)
+-- ==============================================
+local BATTERY_CAPACITY_KWH = 8.0        -- 8 kWh
+local MGUF_MAX_POWER_KW = 325           -- 325 kW
+local MGUR_MAX_POWER_KW = 325           -- 325 kW (total 650 kW)
+local REGEN_MAX_POWER_KW = 250          -- regeneração máxima
+local MAX_TORQUE_NM = 500               -- Binário máximo de referência (500 Nm)
 
-local soc = 1.0
+-- ==============================================
+-- ESTADO INTERNO
+-- ==============================================
+local soc = 1.0                         -- State of Charge (0 a 1)
 local kill_switch_activated = false
 local vehicle = nil
 
--- Converte kW para Nm (aproximação linear)
+-- ==============================================
+-- FUNÇÕES AUXILIARES
+-- ==============================================
 local function power_to_torque(power_kw)
     return power_kw * (MAX_TORQUE_NM / MGUF_MAX_POWER_KW)
 end
 
--- Aplica potência diretamente nos valores de throttle do motor elétrico
 local function apply_throttle(motor_throttle_name, torque_nm)
-    if not vehicle then
-        log('W', 'HRH', 'apply_throttle: vehicle is nil')
-        return
-    end
+    if not vehicle then return end
     vehicle.electrics.values[motor_throttle_name] = torque_nm
-    log('I', 'HRH', string.format('apply_throttle: %s = %.1f Nm', motor_throttle_name, torque_nm))
 end
 
--- Função chamada quando a extensão é carregada
+-- ==============================================
+-- CARREGAMENTO DOS MÓDULOS DE CONTROLO (antigos ficheiros .lua)
+-- ==============================================
+-- Nota: Estes require assumem que os ficheiros estão na mesma pasta (auto)
+local data_logger = require('/lua/vehicle/extensions/auto/data_logger')
+local traction_control = require('/lua/vehicle/extensions/auto/traction_control')
+local regen_braking = require('/lua/vehicle/extensions/auto/regenerative_braking')
+local pit_limiter = require('/lua/vehicle/extensions/auto/pit_limiter')
+local abs_offroad = require('/lua/vehicle/extensions/auto/abs_offroad')
+
+-- ==============================================
+-- FUNÇÃO DE INICIALIZAÇÃO (ANTIGO vehicleController.onInit)
+-- ==============================================
+local function init_modules()
+    print("HRH: Inicializando sistema unificado...")
+
+    -- Inicializa o data logger
+    if data_logger and data_logger.start_logging then
+        data_logger.start_logging(vehicle)
+    end
+
+    -- Inicializa o controlo de tração (passa o próprio M como hybrid_system)
+    if traction_control and traction_control.init then
+        traction_control.init(vehicle, M)
+    end
+
+    -- Inicializa a travagem regenerativa
+    if regen_braking and regen_braking.init then
+        regen_braking.init(vehicle, M)
+    end
+
+    -- Inicializa o Pit Limiter
+    if pit_limiter and pit_limiter.init then
+        pit_limiter.init(vehicle)
+    end
+
+    -- Inicializa o ABS off-road
+    if abs_offroad and abs_offroad.init then
+        abs_offroad.init(vehicle)
+    end
+
+    print("HRH: Todos os sistemas inicializados.")
+end
+
+local function update_modules(dt)
+    if traction_control and traction_control.update then
+        traction_control.update(dt)
+    end
+    if regen_braking and regen_braking.update then
+        regen_braking.update(dt)
+    end
+    if pit_limiter and pit_limiter.update then
+        pit_limiter.update(dt)
+    end
+    if abs_offroad and abs_offroad.update then
+        abs_offroad.update(dt)
+    end
+end
+
+-- ==============================================
+-- FUNÇÕES PRINCIPAIS DA EXTENSÃO (hrh_hybrid)
+-- ==============================================
 function M.onExtensionLoaded()
-    print("HRH Hybrid: Sistema inicializado (autônomo).")
-    
-    -- Obtém a referência do veículo
+    print("HRH Hybrid: Sistema inicializado (versão unificada).")
     vehicle = extensions.getVehicle()
     if vehicle then
         print("HRH Hybrid: Veículo referenciado com sucesso.")
+        init_modules()
     else
         print("HRH Hybrid: ERRO - Não foi possível obter referência do veículo.")
     end
@@ -54,9 +116,6 @@ function M.onExtensionLoaded()
             else
                 print("Vehicle reference is nil")
             end
-            if vehicle then
-                print("throttle_input: " .. tostring(vehicle.electrics.values.throttle_input))
-            end
         end,
         set_throttle = function(value)
             value = math.min(1, math.max(0, value))
@@ -69,7 +128,6 @@ function M.onExtensionLoaded()
     print("HRH: Debug functions available. Type 'hrh_debug.status()' in console.")
 end
 
--- Kill switch
 function M.emergency_kill()
     if kill_switch_activated then return end
     kill_switch_activated = true
@@ -78,7 +136,6 @@ function M.emergency_kill()
     print("HRH Hybrid: KILL SWITCH ACTIVATED!")
 end
 
--- Atualização periódica (chamada automaticamente pela extensão)
 function M.update(dt)
     if not vehicle or kill_switch_activated then return end
 
@@ -107,6 +164,16 @@ function M.update(dt)
         apply_throttle("mguf_throttle", -regen_torque)
         apply_throttle("mgur_throttle", -regen_torque)
     end
+
+    -- Atualiza os módulos de controlo
+    update_modules(dt)
 end
+
+-- Funções de acesso para os outros módulos (traction_control, regen_braking)
+function M.get_soc() return soc end
+function M.set_throttle_front(value) apply_throttle("mguf_throttle", power_to_torque(value * MGUF_MAX_POWER_KW)) end
+function M.set_throttle_rear(value) apply_throttle("mgur_throttle", power_to_torque(value * MGUR_MAX_POWER_KW)) end
+function M.set_regeneration_front(value) apply_throttle("mguf_throttle", -power_to_torque(value * REGEN_MAX_POWER_KW)) end
+function M.set_regeneration_rear(value) apply_throttle("mgur_throttle", -power_to_torque(value * REGEN_MAX_POWER_KW)) end
 
 return M
