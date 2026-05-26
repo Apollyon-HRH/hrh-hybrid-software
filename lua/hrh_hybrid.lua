@@ -54,7 +54,6 @@ function M.onExtensionLoaded()
             else
                 print("Vehicle reference is nil")
             end
-            -- Adiciona verificação do throttle_input
             if vehicle then
                 print("throttle_input: " .. tostring(vehicle.electrics.values.throttle_input))
             end
