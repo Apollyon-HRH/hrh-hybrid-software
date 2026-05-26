@@ -1,6 +1,5 @@
 -- HRH Hybrid Powertrain - Team Apollyon
--- Conforme Art. C3.2, C17.1, C17.2
--- Versão final com API setMotorTorque
+-- Versão final com API setMotorTorque e debug global
 
 local M = {}
 
@@ -16,19 +15,24 @@ local soc = 1.0
 local kill_switch_activated = false
 local vehicle = nil
 
--- Converte kW para Nm a uma rotação de referência (simplificado)
+-- Converte kW para Nm (simplificado)
 local function power_to_torque(power_kw)
     return power_kw * (MAX_TORQUE_NM / MGUF_MAX_POWER_KW)
 end
 
 -- Aplica binário usando a API nativa do BeamNG
+-- Agora chamamos setMotorTorque diretamente no contexto do veículo
 local function apply_motor_torque(motor_name, torque_nm)
     if not vehicle then return end
-    -- O comando é executado no contexto do veículo, garantindo que a API existe
-    vehicle:queueLuaCommand(string.format(
-        "if vehicle and vehicle.electrics then vehicle.electrics:setMotorTorque('%s', %f) end",
-        motor_name, torque_nm
-    ))
+    if vehicle.electrics and vehicle.electrics.setMotorTorque then
+        vehicle.electrics:setMotorTorque(motor_name, torque_nm)
+    else
+        -- Fallback usando queueLuaCommand, embora não deva ser necessário
+        vehicle:queueLuaCommand(string.format(
+            "if vehicle and vehicle.electrics then vehicle.electrics:setMotorTorque('%s', %f) end",
+            motor_name, torque_nm
+        ))
+    end
 end
 
 function M.onExtensionLoaded()
@@ -38,6 +42,21 @@ end
 function M.setVehicle(vehicle_obj)
     vehicle = vehicle_obj
     print("HRH Hybrid: Veículo registrado.")
+    -- Registra a tabela de debug globalmente
+    _G.hrh_debug = {
+        get_soc = function() return soc end,
+        kill = function() M.emergency_kill() end,
+        set_throttle = function(value)
+            value = math.min(1, math.max(0, value))
+            apply_motor_torque("mguf", power_to_torque(value * MGUF_MAX_POWER_KW))
+            apply_motor_torque("mgur", power_to_torque(value * MGUR_MAX_POWER_KW))
+        end,
+        status = function()
+            print("SOC: " .. string.format("%.2f", soc * 100) .. "%")
+            print("Kill switch: " .. tostring(kill_switch_activated))
+        end
+    }
+    print("HRH: Debug functions available. Type 'hrh_debug.status()' in console.")
 end
 
 function M.emergency_kill()
@@ -80,18 +99,7 @@ function M.update(dt)
     end
 end
 
--- Funções de acesso (para debug e outros módulos)
 function M.get_soc() return soc end
 function M.is_kill_switch_active() return kill_switch_activated end
-
--- Função global para debug na consola (F8)
-_G.hrh_debug = {
-    get_soc = function() return soc end,
-    kill = function() M.emergency_kill() end,
-    status = function() 
-        print("SOC: " .. string.format("%.2f", soc * 100) .. "%")
-        print("Kill switch: " .. tostring(kill_switch_activated))
-    end
-}
 
 return M
