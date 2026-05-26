@@ -1,7 +1,9 @@
 -- HRH Hybrid Powertrain - Team Apollyon
--- (código completo com setVehicle e debug global)
+-- Versão final com controlo via electricsThrottleName
+
 local M = {}
 
+-- Parâmetros (Apêndice C5.1)
 local BATTERY_CAPACITY_KWH = 8.0
 local MGUF_MAX_POWER_KW = 325
 local MGUR_MAX_POWER_KW = 325
@@ -12,43 +14,41 @@ local soc = 1.0
 local kill_switch_activated = false
 local vehicle = nil
 
+-- Converte kW para Nm (simplificado)
 local function power_to_torque(power_kw)
     return power_kw * (MAX_TORQUE_NM / MGUF_MAX_POWER_KW)
 end
 
--- NOVA função para aplicar torque, usando a API nativa do BeamNG
-local function apply_motor_torque(motor_name, torque_nm)
+-- Aplica o binário usando o novo método via electricsThrottleName
+local function apply_motor_power(motor_throttle_name, power_kw)
     if not vehicle then return end
-    if vehicle.electrics and vehicle.electrics.setMotorTorque then
-        vehicle.electrics:setMotorTorque(motor_name, torque_nm)
-    else
-        -- Fallback: escreve diretamente no valor
-        vehicle.electrics.values[motor_name] = torque_nm
-    end
+    local torque_nm = power_to_torque(power_kw)
+    -- O módulo do motor no .pc foi configurado para responder a este valor.
+    vehicle.electrics.values[motor_throttle_name] = torque_nm
 end
 
 function M.onExtensionLoaded()
-    print("HRH Hybrid: Sistema inicializado.")
+    print("HRH Hybrid: Sistema inicializado (versão final).")
 end
 
 function M.setVehicle(vehicle_obj)
     vehicle = vehicle_obj
     print("HRH Hybrid: Veículo registrado.")
-    -- Torna o debug global acessível na consola
+
+    -- Torna funções de depuração acessíveis globalmente na consola (F8)
     _G.hrh_debug = {
         get_soc = function() return soc end,
         kill = function() M.emergency_kill() end,
         status = function()
             print("SOC: " .. string.format("%.2f", soc * 100) .. "%")
             print("Kill switch: " .. tostring(kill_switch_activated))
-            print("mguf torque: " .. tostring(vehicle and vehicle.electrics and vehicle.electrics.values.mguf))
-            print("mgur torque: " .. tostring(vehicle and vehicle.electrics and vehicle.electrics.values.mgur))
+            print("mguf torque: " .. tostring(vehicle.electrics.values.mguf_throttle))
+            print("mgur torque: " .. tostring(vehicle.electrics.values.mgur_throttle))
         end,
-        set_throttle = function(val)
-            val = math.min(1, math.max(0, val))
-            local t = power_to_torque(val * MGUF_MAX_POWER_KW)
-            apply_motor_torque("mguf", t)
-            apply_motor_torque("mgur", t)
+        set_throttle = function(value)
+            value = math.min(1, math.max(0, value))
+            apply_motor_power("mguf_throttle", value * MGUF_MAX_POWER_KW)
+            apply_motor_power("mgur_throttle", value * MGUR_MAX_POWER_KW)
         end
     }
     print("HRH: Debug functions available. Type 'hrh_debug.status()' in console.")
@@ -57,31 +57,34 @@ end
 function M.emergency_kill()
     if kill_switch_activated then return end
     kill_switch_activated = true
-    apply_motor_torque("mguf", 0)
-    apply_motor_torque("mgur", 0)
+    apply_motor_power("mguf_throttle", 0)
+    apply_motor_power("mgur_throttle", 0)
     print("HRH Hybrid: KILL SWITCH ACTIVATED!")
 end
 
 function M.update(dt)
     if not vehicle or kill_switch_activated then return end
-    local throttle = vehicle.electrics.values.throttle_input or 0
-    local brake = vehicle.electrics.values.brake_input or 0
 
-    local front_torque = power_to_torque(throttle * MGUF_MAX_POWER_KW)
-    local rear_torque = power_to_torque(throttle * MGUR_MAX_POWER_KW)
-    apply_motor_torque("mguf", front_torque)
-    apply_motor_torque("mgur", rear_torque)
+    local throttle_input = vehicle.electrics.values.throttle_input or 0
+    local brake_input = vehicle.electrics.values.brake_input or 0
 
-    -- Simulação simples da bateria
-    local total_power = (front_torque + rear_torque) * 0.001
-    local energy_used = total_power * (dt / 3600)
-    soc = soc - (energy_used / BATTERY_CAPACITY_KWH)
+    -- Controlo de Potência
+    local desired_power_front = throttle_input * MGUF_MAX_POWER_KW
+    local desired_power_rear = throttle_input * MGUR_MAX_POWER_KW
+    apply_motor_power("mguf_throttle", desired_power_front)
+    apply_motor_power("mgur_throttle", desired_power_rear)
+
+    -- Gestão da Bateria (simples)
+    local total_power_kw = (desired_power_front + desired_power_rear) * throttle_input
+    local energy_used_kwh = total_power_kw * (dt / 3600)
+    soc = soc - (energy_used_kwh / BATTERY_CAPACITY_KWH)
     soc = math.max(0, math.min(1, soc))
 
-    if brake > 0 then
-        local regen_torque = power_to_torque(brake * REGEN_MAX_POWER_KW)
-        apply_motor_torque("mguf", -regen_torque)
-        apply_motor_torque("mgur", -regen_torque)
+    -- Travagem Regenerativa (simples)
+    if brake_input > 0 then
+        local regen_power = brake_input * REGEN_MAX_POWER_KW
+        apply_motor_power("mguf_throttle", -regen_power)
+        apply_motor_power("mgur_throttle", -regen_power)
     end
 end
 
