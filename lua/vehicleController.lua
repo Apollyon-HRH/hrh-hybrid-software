@@ -1,15 +1,15 @@
--- vehicleController.lua (Na RAÍZ do veículo)
+-- vehicleController.lua (na raiz do veículo)
 -- Controller principal do veículo HRH - Team Apollyon
+
 local M = {}
 
--- Carrega as extensões da pasta 'extensions/auto'
--- O 'extensions.load' carrega o módulo e o retorna.
-local hrh_hybrid = extensions.load('hrh_hybrid')
-local data_logger = extensions.load('data_logger')
-local traction_control = extensions.load('traction_control')
-local regen_braking = extensions.load('regenerative_braking')
-local pit_limiter = extensions.load('pit_limiter')
-local abs_offroad = extensions.load('abs_offroad')
+-- CORREÇÃO AQUI: Carrega os módulos com 'require' e caminhos absolutos!
+local hrh_hybrid = require('lua/vehicle/extensions/auto/hrh_hybrid')
+local data_logger = require('lua/vehicle/extensions/auto/data_logger')
+local traction_control = require('lua/vehicle/extensions/auto/traction_control')
+local regen_braking = require('lua/vehicle/extensions/auto/regenerative_braking')
+local pit_limiter = require('lua/vehicle/extensions/auto/pit_limiter')
+local abs_offroad = require('lua/vehicle/extensions/auto/abs_offroad')
 
 function M.onInit()
     print("HRH: Inicializando sistema...")
