@@ -1,5 +1,6 @@
 -- HRH Hybrid Powertrain - Team Apollyon
 -- Conforme Art. C3.2, C17.1, C17.2
+-- Versão final com API setMotorTorque
 
 local M = {}
 
@@ -9,24 +10,25 @@ local MGUF_MAX_POWER_KW = 325
 local MGUR_MAX_POWER_KW = 325
 local REGEN_MAX_POWER_KW = 250
 local MAX_TORQUE_NM = 500
-local NOMINAL_VOLTAGE = 800.0
 
 -- Estado interno
 local soc = 1.0
 local kill_switch_activated = false
 local vehicle = nil
 
--- Função utilitária
+-- Converte kW para Nm a uma rotação de referência (simplificado)
 local function power_to_torque(power_kw)
     return power_kw * (MAX_TORQUE_NM / MGUF_MAX_POWER_KW)
 end
 
--- NOVO: Função que efetivamente aplica o binário ao motor elétrico.
--- O BeamNG procura por um componente com o nome "mguf" no ficheiro .pc e aplica-lhe o binário.
+-- Aplica binário usando a API nativa do BeamNG
 local function apply_motor_torque(motor_name, torque_nm)
-    if not vehicle or not vehicle.electrics then return end
-    -- O caminho certo para definir o binário de um motor elétrico.
-    vehicle.electrics.values[motor_name .. "_torque"] = torque_nm
+    if not vehicle then return end
+    -- O comando é executado no contexto do veículo, garantindo que a API existe
+    vehicle:queueLuaCommand(string.format(
+        "if vehicle and vehicle.electrics then vehicle.electrics:setMotorTorque('%s', %f) end",
+        motor_name, torque_nm
+    ))
 end
 
 function M.onExtensionLoaded()
@@ -39,6 +41,7 @@ function M.setVehicle(vehicle_obj)
 end
 
 function M.emergency_kill()
+    if kill_switch_activated then return end
     kill_switch_activated = true
     apply_motor_torque("mguf", 0)
     apply_motor_torque("mgur", 0)
@@ -51,24 +54,24 @@ function M.update(dt)
     local throttle_input = vehicle.electrics.values.throttle_input or 0
     local brake_input = vehicle.electrics.values.brake_input or 0
 
-    -- Calcula potência desejada
+    -- Potência desejada (kW)
     local desired_power_front = throttle_input * MGUF_MAX_POWER_KW
     local desired_power_rear = throttle_input * MGUR_MAX_POWER_KW
 
-    -- Converte para binário e aplica!
-    local mguf_torque_nm = power_to_torque(desired_power_front)
-    local mgur_torque_nm = power_to_torque(desired_power_rear)
+    -- Binário correspondente
+    local mguf_torque = power_to_torque(desired_power_front)
+    local mgur_torque = power_to_torque(desired_power_rear)
 
-    apply_motor_torque("mguf", mguf_torque_nm)
-    apply_motor_torque("mgur", mgur_torque_nm)
+    apply_motor_torque("mguf", mguf_torque)
+    apply_motor_torque("mgur", mgur_torque)
 
-    -- Cálculo simples da bateria
-    local total_power_kw = (mguf_torque_nm + mgur_torque_nm)
+    -- Gestão simples da bateria
+    local total_power_kw = (desired_power_front + desired_power_rear) * (mguf_torque / MAX_TORQUE_NM)
     local energy_used_kwh = total_power_kw * (dt / 3600)
     soc = soc - (energy_used_kwh / BATTERY_CAPACITY_KWH)
     soc = math.max(0, math.min(1, soc))
 
-    -- Ação regenerativa (exemplo simples)
+    -- Travagem regenerativa (simples)
     if brake_input > 0 then
         local regen_power = brake_input * REGEN_MAX_POWER_KW
         local regen_torque = power_to_torque(regen_power)
@@ -77,7 +80,18 @@ function M.update(dt)
     end
 end
 
+-- Funções de acesso (para debug e outros módulos)
 function M.get_soc() return soc end
 function M.is_kill_switch_active() return kill_switch_activated end
+
+-- Função global para debug na consola (F8)
+_G.hrh_debug = {
+    get_soc = function() return soc end,
+    kill = function() M.emergency_kill() end,
+    status = function() 
+        print("SOC: " .. string.format("%.2f", soc * 100) .. "%")
+        print("Kill switch: " .. tostring(kill_switch_activated))
+    end
+}
 
 return M
