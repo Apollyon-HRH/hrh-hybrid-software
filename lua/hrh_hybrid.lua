@@ -1,5 +1,5 @@
 -- HRH Hybrid Powertrain - Team Apollyon
--- Versão final com API setMotorTorque e debug global
+-- Versão com correção definitiva de torque e debug
 
 local M = {}
 
@@ -20,19 +20,17 @@ local function power_to_torque(power_kw)
     return power_kw * (MAX_TORQUE_NM / MGUF_MAX_POWER_KW)
 end
 
--- Aplica binário usando a API nativa do BeamNG
--- Agora chamamos setMotorTorque diretamente no contexto do veículo
+-- NOVA função para aplicar o torque.
+-- Escreve diretamente nos valores do .pc, que é o que o seu carro espera.
 local function apply_motor_torque(motor_name, torque_nm)
-    if not vehicle then return end
-    if vehicle.electrics and vehicle.electrics.setMotorTorque then
-        vehicle.electrics:setMotorTorque(motor_name, torque_nm)
-    else
-        -- Fallback usando queueLuaCommand, embora não deva ser necessário
-        vehicle:queueLuaCommand(string.format(
-            "if vehicle and vehicle.electrics then vehicle.electrics:setMotorTorque('%s', %f) end",
-            motor_name, torque_nm
-        ))
+    if not vehicle then
+        log('E', 'HRH', 'apply_motor_torque: vehicle is nil')
+        return
     end
+    -- O nome da variável nos eletrics deve ser exatamente o mesmo que o nome
+    -- da peça (part) no seu arquivo ccbec.pc, neste caso "mguf" e "mgur".
+    vehicle.electrics.values[motor_name] = torque_nm
+    log('I', 'HRH', string.format('Torque applied: %s = %.1f Nm', motor_name, torque_nm))
 end
 
 function M.onExtensionLoaded()
@@ -42,18 +40,21 @@ end
 function M.setVehicle(vehicle_obj)
     vehicle = vehicle_obj
     print("HRH Hybrid: Veículo registrado.")
-    -- Registra a tabela de debug globalmente
+    
+    -- Função de debug global
     _G.hrh_debug = {
         get_soc = function() return soc end,
         kill = function() M.emergency_kill() end,
+        status = function()
+            print("SOC: " .. string.format("%.2f", soc * 100) .. "%")
+            print("Kill switch: " .. tostring(kill_switch_activated))
+            print("mguf torque: " .. tostring(vehicle.electrics.values.mguf))
+            print("mgur torque: " .. tostring(vehicle.electrics.values.mgur))
+        end,
         set_throttle = function(value)
             value = math.min(1, math.max(0, value))
             apply_motor_torque("mguf", power_to_torque(value * MGUF_MAX_POWER_KW))
             apply_motor_torque("mgur", power_to_torque(value * MGUR_MAX_POWER_KW))
-        end,
-        status = function()
-            print("SOC: " .. string.format("%.2f", soc * 100) .. "%")
-            print("Kill switch: " .. tostring(kill_switch_activated))
         end
     }
     print("HRH: Debug functions available. Type 'hrh_debug.status()' in console.")
@@ -77,7 +78,7 @@ function M.update(dt)
     local desired_power_front = throttle_input * MGUF_MAX_POWER_KW
     local desired_power_rear = throttle_input * MGUR_MAX_POWER_KW
 
-    -- Binário correspondente
+    -- Binário correspondente e aplicação!
     local mguf_torque = power_to_torque(desired_power_front)
     local mgur_torque = power_to_torque(desired_power_rear)
 
