@@ -1,0 +1,6 @@
+{
+    "beamng_version": "1.29.0",
+    "random_seed": 42,
+    "physics_fps": 1000,
+    "headless": true
+}
