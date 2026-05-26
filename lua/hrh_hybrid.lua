@@ -1,6 +1,5 @@
 -- HRH Hybrid Powertrain - Team Apollyon
 -- (código completo com setVehicle e debug global)
-
 local M = {}
 
 local BATTERY_CAPACITY_KWH = 8.0
@@ -17,13 +16,13 @@ local function power_to_torque(power_kw)
     return power_kw * (MAX_TORQUE_NM / MGUF_MAX_POWER_KW)
 end
 
+-- NOVA função para aplicar torque, usando a API nativa do BeamNG
 local function apply_motor_torque(motor_name, torque_nm)
     if not vehicle then return end
-    -- Tenta usar o método nativo primeiro
     if vehicle.electrics and vehicle.electrics.setMotorTorque then
         vehicle.electrics:setMotorTorque(motor_name, torque_nm)
     else
-        -- Fallback: escreve diretamente no valor (alguns mods usam isto)
+        -- Fallback: escreve diretamente no valor
         vehicle.electrics.values[motor_name] = torque_nm
     end
 end
@@ -74,7 +73,7 @@ function M.update(dt)
     apply_motor_torque("mgur", rear_torque)
 
     -- Simulação simples da bateria
-    local total_power = (front_torque + rear_torque) * 0.001  -- Aproximação
+    local total_power = (front_torque + rear_torque) * 0.001
     local energy_used = total_power * (dt / 3600)
     soc = soc - (energy_used / BATTERY_CAPACITY_KWH)
     soc = math.max(0, math.min(1, soc))
